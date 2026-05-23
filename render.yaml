@@ -1,0 +1,10 @@
+services:
+  - type: static_site
+    name: roerso-mondo-ets
+    env: static
+    buildCommand: echo "No build needed"
+    staticPublicPath: ./
+    routes:
+      - path: /*
+        destination: /index.html
+        type: rewrite

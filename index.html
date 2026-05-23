@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roerso Mondo ETS — Amministrazione</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div id="login-screen" class="login-screen">
+    <form id="login-form" class="login-box">
+      <h1>Roerso Mondo ETS</h1>
+      <p class="sottotitolo">Gestione amministrativa</p>
+      <div style="margin-bottom:12px">
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" required autocomplete="username" />
+      </div>
+      <div style="margin-bottom:16px">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" required autocomplete="current-password" />
+      </div>
+      <button type="submit" style="width:100%;padding:10px">Accedi</button>
+      <p class="login-hint">Utente gestito da Supabase Authentication</p>
+    </form>
+  </div>
+
+  <!-- APP -->
+  <div id="app-shell" class="app-shell" style="display:none;">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h2>Roerso Mondo ETS</h2>
+        <div class="anno" id="sb-anno">Anno 2026</div>
+      </div>
+      <nav id="sidebar-nav">
+        <a href="#dashboard" data-route="dashboard">Dashboard</a>
+        <a href="#primanota" data-route="primanota">Prima Nota</a>
+        <a href="#nuovo-movimento" data-route="nuovo-movimento">+ Aggiungi movimento</a>
+        <a href="#analizza-pdf" data-route="analizza-pdf" data-admin-only>Analizza PDF</a>
+        <a href="#documenti" data-route="documenti">📋 Documenti</a>
+        <a href="#abbinamento" data-route="abbinamento">Abbinamento EC</a>
+        <a href="#enti" data-route="enti">Enti e Budget</a>
+        <a href="#rendicontazione" data-route="rendicontazione">Rendicontazione</a>
+        <a href="#note-spese" data-route="note-spese">Note Spese</a>
+        <a href="#export" data-route="export">Export</a>
+        <a href="#impostazioni" data-route="impostazioni" data-admin-only>Impostazioni</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <strong id="sb-user-name">—</strong>
+          <span id="sb-user-ruolo">—</span>
+        </div>
+        <button id="btn-logout" type="button">Logout</button>
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+
+      <section class="section" id="sec-dashboard">
+        <div class="page-header">
+          <h1>Dashboard</h1>
+          <div class="actions">
+            <button onclick="location.hash='#nuovo-movimento'">+ Aggiungi</button>
+            <button class="secondary" onclick="location.hash='#abbinamento'">Importa EC</button>
+            <button class="secondary" onclick="location.hash='#export'">Esporta</button>
+          </div>
+        </div>
+        <div id="dashboard-content"></div>
+      </section>
+
+      <section class="section" id="sec-primanota">
+        <div class="page-header">
+          <h1>Prima Nota</h1>
+          <div class="actions">
+            <button onclick="location.hash='#nuovo-movimento'">+ Aggiungi</button>
+          </div>
+        </div>
+        <div id="primanota-content"></div>
+      </section>
+
+      <section class="section" id="sec-nuovo-movimento">
+        <div class="page-header">
+          <h1 id="nm-title">Nuovo movimento</h1>
+        </div>
+        <div id="nuovo-movimento-content"></div>
+      </section>
+
+      <section class="section" id="sec-analizza-pdf">
+        <div class="page-header">
+          <h1>Analizza PDF con AI</h1>
+        </div>
+        <div id="analizza-pdf-content"></div>
+      </section>
+
+      <section class="section" id="sec-documenti">
+        <div class="page-header">
+          <h1>📋 Documenti</h1>
+        </div>
+        <div id="documenti-content"></div>
+      </section>
+
+      <section class="section" id="sec-abbinamento">
+        <div class="page-header">
+          <h1>Abbinamento Estratto Conto</h1>
+        </div>
+        <div id="abbinamento-content"></div>
+      </section>
+
+      <section class="section" id="sec-enti">
+        <div class="page-header">
+          <h1>Enti e Budget</h1>
+          <div class="actions">
+            <button id="btn-add-ente">+ Aggiungi ente</button>
+          </div>
+        </div>
+        <div id="enti-content"></div>
+      </section>
+
+      <section class="section" id="sec-rendicontazione">
+        <div class="page-header">
+          <h1>Rendicontazione per Ente</h1>
+        </div>
+        <div id="rendicontazione-content"></div>
+      </section>
+
+      <section class="section" id="sec-note-spese">
+        <div class="page-header">
+          <h1>Note Spese ricevute</h1>
+        </div>
+        <div id="note-spese-content"></div>
+      </section>
+
+      <section class="section" id="sec-export">
+        <div class="page-header">
+          <h1>Export</h1>
+        </div>
+        <div id="export-content"></div>
+      </section>
+
+      <section class="section" id="sec-impostazioni">
+        <div class="page-header">
+          <h1>Impostazioni</h1>
+        </div>
+        <div id="impostazioni-content"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Flash + Modal hosts -->
+  <div class="flash-container" id="flash-container"></div>
+  <div id="modal-host"></div>
+
+  <!-- CDN libs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window["pdfjsLib"]) {
+      window["pdfjsLib"].GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Config (chiavi API locali) -->
+  <script src="config.js"></script>
+
+  <!-- App modules (ES6) -->
+  <script type="module" src="supabase.js"></script>
+  <script type="module" src="ai.js"></script>
+  <script type="module" src="drive.js"></script>
+  <script src="xml.js"></script>
+  <script type="module" src="export.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

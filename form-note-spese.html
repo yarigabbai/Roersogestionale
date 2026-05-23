@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roerso — Nota Spese</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Schermata PIN -->
+  <div id="pin-screen" class="ns-pin-screen">
+    <form id="pin-form" class="ns-pin-box">
+      <h2 style="margin:0 0 8px;color:var(--blu-scuro)">Roerso Mondo ETS</h2>
+      <p class="text-muted" style="margin:0 0 20px;font-size:13px">Inserisci PIN per accedere al form note spese</p>
+      <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" required />
+      <button type="submit" style="width:100%;margin-top:12px;padding:10px">Accedi</button>
+      <p id="pin-error" style="color:var(--rosso);font-size:12px;margin-top:8px;display:none">PIN errato</p>
+    </form>
+  </div>
+
+  <!-- Form note spese -->
+  <div id="form-screen" class="note-spese-page" style="display:none">
+    <div class="ns-header">
+      <h1>Nota Spese</h1>
+      <p>Compila e invia — arriva direttamente in amministrazione</p>
+    </div>
+
+    <form id="ns-form" class="form-card">
+      <div style="margin-bottom:12px">
+        <label>Persona *</label>
+        <select id="ns-persona" required>
+          <option value="">Seleziona...</option>
+          <option>Michele Moi</option>
+          <option>Anna Rizzi Bogdan</option>
+          <option>Sonia Marianni</option>
+          <option>Alessandra Lazzaro</option>
+          <option>Altro</option>
+        </select>
+      </div>
+      <div id="ns-persona-altro" style="display:none;margin-bottom:12px">
+        <input id="ns-persona-nome" type="text" placeholder="Nome cognome" />
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label>Data *</label>
+        <input id="ns-data" type="date" required />
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label>Progetto</label>
+        <select id="ns-progetto">
+          <option>Generale</option>
+          <option>SSF EDU</option>
+          <option>SSF Estivo</option>
+          <option>Silent Tales</option>
+          <option>Itinerari EDU VE</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label>Evento / attività</label>
+        <input id="ns-evento" type="text" placeholder="es. Sopralluogo Aglientu" />
+      </div>
+
+      <h3 style="margin:16px 0 8px;color:var(--blu-scuro);font-size:15px">Voci di spesa</h3>
+      <div id="ns-voci"></div>
+      <button type="button" id="btn-add-voce" class="secondary" style="width:100%;margin-top:8px">+ Aggiungi voce</button>
+
+      <div style="margin:16px 0 12px">
+        <label>Metodo pagamento</label>
+        <select id="ns-metodo">
+          <option>Contanti</option>
+          <option>Carta personale</option>
+          <option>BPE</option>
+          <option>NEXI</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label>Note generali</label>
+        <textarea id="ns-note" rows="2"></textarea>
+      </div>
+
+      <div class="ns-totale" id="ns-totale">Totale: € 0,00</div>
+
+      <button type="submit" style="width:100%;margin-top:16px;padding:12px;font-size:16px">Invia nota spese</button>
+    </form>
+
+    <p id="ns-success" style="display:none;color:var(--verde);text-align:center;font-weight:600;margin-top:16px">
+      ✓ Nota spese inviata correttamente!
+    </p>
+  </div>
+
+  <script src="config.js"></script>
+  <!-- Google APIs per Drive Picker -->
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client"></script>
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+    const sb = createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY);
+
+    // PIN
+    document.getElementById("pin-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const v = document.getElementById("pin-input").value;
+      if (v === String(window.CONFIG.NOTE_SPESE_PIN)) {
+        document.getElementById("pin-screen").style.display = "none";
+        document.getElementById("form-screen").style.display = "block";
+        sessionStorage.setItem("ns_authed", "1");
+      } else {
+        document.getElementById("pin-error").style.display = "block";
+      }
+    });
+    if (sessionStorage.getItem("ns_authed") === "1") {
+      document.getElementById("pin-screen").style.display = "none";
+      document.getElementById("form-screen").style.display = "block";
+    }
+
+    // Data default
+    document.getElementById("ns-data").value = new Date().toISOString().slice(0,10);
+
+    // Persona altro
+    document.getElementById("ns-persona").addEventListener("change", e => {
+      document.getElementById("ns-persona-altro").style.display = e.target.value === "Altro" ? "block" : "none";
+    });
+
+    // Voci di spesa dinamiche
+    const vociHost = document.getElementById("ns-voci");
+    function addVoce(v = {}) {
+      const div = document.createElement("div");
+      div.className = "ns-voce";
+      div.innerHTML = `
+        <button type="button" class="remove-btn">×</button>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <div>
+            <label>Tipo</label>
+            <select class="v-tipo">
+              <option>Vitto</option>
+              <option>Alloggio</option>
+              <option>Trasporto</option>
+              <option>Materiali</option>
+              <option>Altro</option>
+            </select>
+          </div>
+          <div>
+            <label>Importo (€)</label>
+            <input class="v-importo" type="number" step="0.01" min="0" value="${v.importo||""}" />
+          </div>
+          <div class="full">
+            <label>Descrizione</label>
+            <input class="v-desc" type="text" value="${v.descrizione||""}" />
+          </div>
+          <div class="full">
+            <label>Scontrino / fattura</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <button type="button" class="btn-drive-picker secondary" style="flex:1;min-width:140px">🔗 Scegli da Drive</button>
+              <label class="btn-file-upload secondary" style="flex:1;min-width:140px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:7px 12px;border:1px solid var(--grigio-bordo);border-radius:var(--radius);background:white;font-size:14px">
+                📷 Carica file
+                <input class="v-file" type="file" accept="image/*,application/pdf" style="display:none" />
+              </label>
+            </div>
+            <input class="v-link" type="hidden" value="${v.link_scontrino||""}" />
+            <div class="v-link-info text-muted" style="font-size:12px;margin-top:2px">
+              ${v.link_scontrino
+                ? '✓ <a href="'+v.link_scontrino+'" target="_blank">file allegato</a> <button type="button" class="btn-rimuovi-allegato" style="background:transparent;border:none;color:var(--rosso);cursor:pointer;font-size:12px;padding:0 4px">× rimuovi</button>'
+                : 'Nessun allegato (puoi inviare anche senza)'}
+            </div>
+            <div class="v-upload-status" style="display:none;font-size:11px;margin-top:4px"></div>
+          </div>
+        </div>
+      `;
+      div.querySelector(".remove-btn").onclick = () => { div.remove(); aggiornaTotale(); };
+      div.querySelector(".v-importo").addEventListener("input", aggiornaTotale);
+
+      // Helper per aggiornare la visualizzazione del link allegato + il bottone "rimuovi"
+      function aggiornaLinkInfo() {
+        const link = div.querySelector(".v-link").value.trim();
+        const info = div.querySelector(".v-link-info");
+        const source = info.dataset.source || "";
+        if (link) {
+          info.innerHTML = `✓ <a href="${link}" target="_blank">file allegato${source ? ' ('+source+')' : ''}</a> <button type="button" class="btn-rimuovi-allegato" style="background:transparent;border:none;color:var(--rosso);cursor:pointer;font-size:12px;padding:0 4px">× rimuovi</button>`;
+          info.querySelector(".btn-rimuovi-allegato").onclick = () => {
+            if (!confirm("Rimuovere l'allegato da questa voce? (Il file rimane su Drive/Storage, viene solo scollegato.)")) return;
+            div.querySelector(".v-link").value = "";
+            div.querySelector(".v-file").value = "";
+            info.dataset.source = "";
+            const status = div.querySelector(".v-upload-status");
+            status.style.display = "none";
+            aggiornaLinkInfo();
+          };
+        } else {
+          info.innerHTML = `Nessun allegato (puoi inviare anche senza)`;
+        }
+      }
+      // Bind iniziale del bottone "rimuovi" se c'è già un link
+      const existingRimuovi = div.querySelector(".btn-rimuovi-allegato");
+      if (existingRimuovi) aggiornaLinkInfo();
+
+      // Drive Picker
+      div.querySelector(".btn-drive-picker").addEventListener("click", async () => {
+        const status = div.querySelector(".v-upload-status");
+        status.style.display = "block";
+        status.style.color = "var(--blu-medio)";
+        status.textContent = "⏳ Apertura Drive Picker...";
+        try {
+          const f = await apriDrivePicker();
+          if (f) {
+            div.querySelector(".v-link").value = f.viewUrl;
+            div.querySelector(".v-link-info").dataset.source = "Drive: " + f.name;
+            aggiornaLinkInfo();
+            status.style.display = "none";
+          } else {
+            status.style.display = "none";
+          }
+        } catch (e) {
+          status.style.color = "var(--rosso)";
+          status.textContent = "❌ " + (e.message || e);
+        }
+      });
+
+      // File locale (caricato su Supabase Storage)
+      div.querySelector(".v-file").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const status = div.querySelector(".v-upload-status");
+        status.style.display = "block";
+        status.style.color = "var(--blu-medio)";
+        status.textContent = "⏳ Carico " + file.name + "...";
+        try {
+          const url = await uploadScontrino(file);
+          div.querySelector(".v-link").value = url;
+          div.querySelector(".v-link-info").dataset.source = "Storage: " + file.name;
+          aggiornaLinkInfo();
+          status.style.color = "var(--verde)";
+          status.textContent = "✓ Caricato";
+        } catch (err) {
+          status.style.color = "var(--rosso)";
+          status.textContent = "❌ " + err.message;
+        }
+      });
+
+      vociHost.appendChild(div);
+      aggiornaTotale();
+    }
+
+    // =========================================================================
+    // Drive Picker — Google API
+    // =========================================================================
+    let _pickerInited = false, _gisInited = false, _tokenClient = null, _accessToken = null;
+
+    async function initPickerApi() {
+      if (_pickerInited) return;
+      await new Promise(resolve => gapi.load('picker', { callback: resolve }));
+      _pickerInited = true;
+    }
+
+    function initGisClient() {
+      if (_gisInited) return;
+      if (!window.CONFIG.GOOGLE_CLIENT_ID) throw new Error("GOOGLE_CLIENT_ID mancante in config.js");
+      _tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: window.CONFIG.GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: () => {}, // sovrascritto per ogni chiamata
+      });
+      _gisInited = true;
+    }
+
+    async function ottieniGoogleToken() {
+      initGisClient();
+      if (_accessToken) return _accessToken;
+      return new Promise((resolve, reject) => {
+        _tokenClient.callback = (resp) => {
+          if (resp.error) reject(new Error(resp.error));
+          else { _accessToken = resp.access_token; resolve(_accessToken); }
+        };
+        _tokenClient.requestAccessToken({ prompt: '' });
+      });
+    }
+
+    async function apriDrivePicker() {
+      if (!window.CONFIG.GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY mancante in config.js");
+      await initPickerApi();
+      const token = await ottieniGoogleToken();
+      return new Promise((resolve) => {
+        const docsView = new google.picker.DocsView()
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(false);
+        const uploadView = new google.picker.DocsUploadView();
+        const picker = new google.picker.PickerBuilder()
+          .enableFeature(google.picker.Feature.NAV_HIDDEN)
+          .setOAuthToken(token)
+          .setDeveloperKey(window.CONFIG.GOOGLE_API_KEY)
+          .addView(docsView)
+          .addView(uploadView)
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) {
+              const f = data.docs[0];
+              resolve({
+                id: f.id,
+                name: f.name,
+                viewUrl: f.url || `https://drive.google.com/file/d/${f.id}/view`,
+              });
+            } else if (data.action === google.picker.Action.CANCEL) {
+              resolve(null);
+            }
+          })
+          .build();
+        picker.setVisible(true);
+      });
+    }
+
+    // Upload scontrino → Supabase Storage (bucket "scontrini") — fallback per chi non vuole Drive
+    async function uploadScontrino(file) {
+      if (!file) return null;
+      const sanitized = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+      const ts = Date.now();
+      const rand = Math.random().toString(36).substring(2, 8);
+      const path = `${new Date().getFullYear()}/${ts}_${rand}_${sanitized}`;
+      const { error: upErr } = await sb.storage.from('scontrini').upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+      if (upErr) throw new Error("Upload fallito: " + upErr.message);
+      const { data: pub } = sb.storage.from('scontrini').getPublicUrl(path);
+      return pub.publicUrl;
+    }
+    document.getElementById("btn-add-voce").onclick = () => addVoce();
+    addVoce(); // una di partenza
+
+    function aggiornaTotale() {
+      let tot = 0;
+      vociHost.querySelectorAll(".v-importo").forEach(i => tot += parseFloat(i.value) || 0);
+      document.getElementById("ns-totale").textContent = `Totale: ${tot.toLocaleString("it-IT", { style: "currency", currency: "EUR" })}`;
+    }
+
+    // Submit
+    document.getElementById("ns-form").addEventListener("submit", async e => {
+      e.preventDefault();
+      const persona = document.getElementById("ns-persona").value === "Altro"
+        ? document.getElementById("ns-persona-nome").value.trim()
+        : document.getElementById("ns-persona").value;
+      if (!persona) return alert("Seleziona o inserisci il nome");
+
+      // Gli upload sono già stati eseguiti onChange. Qui basta raccogliere i link.
+      const submitBtn = document.querySelector("#ns-form button[type=submit]");
+      const vociElems = [...vociHost.querySelectorAll(".ns-voce")];
+      const voci = [];
+      for (const v of vociElems) {
+        const imp = parseFloat(v.querySelector(".v-importo").value) || 0;
+        if (imp <= 0) continue;
+        voci.push({
+          tipo: v.querySelector(".v-tipo").value,
+          descrizione: v.querySelector(".v-desc").value.trim(),
+          importo: imp,
+          link_scontrino: v.querySelector(".v-link").value.trim(),
+        });
+      }
+      if (!voci.length) return alert("Aggiungi almeno una voce di spesa");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "⏳ Invio nota spese...";
+
+      const totale = voci.reduce((s, v) => s + v.importo, 0);
+      const payload = {
+        data: document.getElementById("ns-data").value,
+        persona,
+        progetto: document.getElementById("ns-progetto").value,
+        evento: document.getElementById("ns-evento").value.trim(),
+        voci,
+        totale,
+        metodo_pagamento: document.getElementById("ns-metodo").value,
+        note: document.getElementById("ns-note").value.trim(),
+        stato: "Da elaborare",
+      };
+      try {
+        const { error } = await sb.from("note_spese").insert(payload);
+        if (error) throw error;
+        document.getElementById("ns-form").style.display = "none";
+        document.getElementById("ns-success").style.display = "block";
+        setTimeout(() => location.reload(), 3000);
+      } catch (err) {
+        alert("Errore: " + err.message);
+      }
+    });
+  </script>
+</body>
+</html>

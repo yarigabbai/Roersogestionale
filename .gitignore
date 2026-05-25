@@ -1,7 +1,7 @@
 # Environment
 .env
 .env.local
-//config.js
+config.js
 node_modules/
 
 # IDE

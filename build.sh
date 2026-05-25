@@ -1,0 +1,14 @@
+#!/bin/bash
+cat > config.js << EOF
+const CONFIG = {
+  SUPABASE_URL: "$SUPABASE_URL",
+  SUPABASE_ANON_KEY: "$SUPABASE_ANON_KEY",
+  ANTHROPIC_API_KEY: "$ANTHROPIC_API_KEY",
+  ANTHROPIC_MODEL: "claude-haiku-4-5-20251001",
+  GOOGLE_CLIENT_ID: "$GOOGLE_CLIENT_ID",
+  GOOGLE_API_KEY: "$GOOGLE_API_KEY",
+  NOTE_SPESE_PIN: "$NOTE_SPESE_PIN",
+};
+window.CONFIG = CONFIG;
+EOF
+echo "config.js generato correttamente"

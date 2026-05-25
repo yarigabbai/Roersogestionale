@@ -9,7 +9,7 @@ const CONFIG = {
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjbnNvY3hkcHdrcmxvZWVncnVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MzQ4MjEsImV4cCI6MjA5NDUxMDgyMX0.73L3LrMj6jo8O5STxj5z4Fj02-CmHlu6MNZ2uaLR5qA",
 
   // Anthropic — ⚠️ esposta in browser, gestire con limiti di spesa
-  ANTHROPIC_API_KEY: "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",
+  ANTHROPIC_API_KEY: "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",
   ANTHROPIC_MODEL: "claude-haiku-4-5-20251001",
 
   // Google Drive — da configurare in fase 2

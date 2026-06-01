@@ -132,6 +132,9 @@ CREATE TABLE movimenti (
   -- Abbinamento EC
   ec_id UUID REFERENCES ec_bancario(id) ON DELETE SET NULL,
   rif_distinta TEXT,
+  -- Gerarchia sotto-movimenti
+  parent_id UUID,                   -- NULL = movimento primario; UUID = sotto-movimento di parent_id
+  is_reference BOOLEAN DEFAULT FALSE, -- TRUE = padre diventato solo contenitore (reversibile)
   -- Stato
   stato TEXT DEFAULT 'In lavorazione',
   senza_documento BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE per commissioni/bolli
@@ -151,6 +154,10 @@ CREATE INDEX idx_mov_stato ON movimenti(stato);
 CREATE INDEX idx_mov_metodo ON movimenti(metodo);
 CREATE INDEX idx_mov_drive ON movimenti(drive_file_id);
 CREATE INDEX idx_mov_ordine_manuale ON movimenti(ordine_manuale);
+CREATE INDEX idx_mov_parent ON movimenti(parent_id);
+
+-- FK self-referencing per sotto-movimenti
+ALTER TABLE movimenti ADD CONSTRAINT fk_mov_parent FOREIGN KEY (parent_id) REFERENCES movimenti(id) ON DELETE SET NULL;
 
 -- FK ec_bancario.movimento_id → movimenti.id (chiusura ciclica)
 ALTER TABLE ec_bancario
@@ -300,17 +307,18 @@ FOR EACH ROW EXECUTE FUNCTION aggiorna_stato_movimento();
 -- che hanno o avranno documento (NON commissioni/bolli con senza_documento).
 -- =====================================================================
 CREATE OR REPLACE FUNCTION ricalcola_progressivi(p_anno INTEGER) RETURNS INTEGER AS $$
-DECLARE
-  v_count INTEGER;
+DECLARE v_count INTEGER;
 BEGIN
-  -- Auto-numera solo righe SENZA override, SENZA escludi, SENZA senza_documento
+  -- 1) Auto-numera solo righe PRIMARIE senza override/escludi/senza_doc/is_reference
   WITH ordered AS (
     SELECT id,
            ROW_NUMBER() OVER (ORDER BY data, creato_il, id) AS num
     FROM movimenti
     WHERE anno = p_anno
+      AND parent_id IS NULL
       AND COALESCE(senza_documento, FALSE) = FALSE
       AND COALESCE(escludi_progr, FALSE) = FALSE
+      AND COALESCE(is_reference, FALSE) = FALSE
       AND (progressivo_override IS NULL OR progressivo_override = '')
   )
   UPDATE movimenti m
@@ -319,19 +327,50 @@ BEGIN
   WHERE m.id = o.id;
   GET DIAGNOSTICS v_count = ROW_COUNT;
 
-  -- Righe con override → display = override
+  -- 2) Override su primari
   UPDATE movimenti
   SET progressivo = progressivo_override
   WHERE anno = p_anno
+    AND parent_id IS NULL
     AND progressivo_override IS NOT NULL
     AND progressivo_override <> '';
 
-  -- Righe escluse/commissioni → NULL
+  -- 3) Primari esclusi/riferimento → NULL
   UPDATE movimenti
   SET progressivo = NULL
   WHERE anno = p_anno
-    AND (COALESCE(senza_documento, FALSE) = TRUE OR COALESCE(escludi_progr, FALSE) = TRUE)
+    AND parent_id IS NULL
+    AND (COALESCE(senza_documento, FALSE) = TRUE
+      OR COALESCE(escludi_progr, FALSE) = TRUE
+      OR COALESCE(is_reference, FALSE) = TRUE)
     AND (progressivo_override IS NULL OR progressivo_override = '');
+
+  -- 4) Figli: progressivo = progressivo_padre.n
+  WITH figli AS (
+    SELECT m.id,
+           p.progressivo AS progr_padre,
+           ROW_NUMBER() OVER (PARTITION BY m.parent_id ORDER BY m.data, m.creato_il, m.id) AS n
+    FROM movimenti m
+    JOIN movimenti p ON p.id = m.parent_id
+    WHERE m.anno = p_anno
+      AND m.parent_id IS NOT NULL
+      AND p.progressivo IS NOT NULL
+  )
+  UPDATE movimenti m
+  SET progressivo = f.progr_padre || '.' || f.n::TEXT
+  FROM figli f
+  WHERE m.id = f.id;
+
+  -- 5) Figli il cui padre non ha progressivo → NULL
+  UPDATE movimenti
+  SET progressivo = NULL
+  WHERE anno = p_anno
+    AND parent_id IS NOT NULL
+    AND id NOT IN (
+      SELECT m.id FROM movimenti m
+      JOIN movimenti p ON p.id = m.parent_id
+      WHERE p.progressivo IS NOT NULL AND m.anno = p_anno
+    );
 
   RETURN v_count;
 END;
@@ -356,7 +395,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_ricalcola_progressivi
-AFTER INSERT OR UPDATE OF data, anno, senza_documento, escludi_progr, progressivo_override OR DELETE
+AFTER INSERT OR UPDATE OF data, anno, senza_documento, escludi_progr, progressivo_override, parent_id, is_reference OR DELETE
 ON movimenti
 FOR EACH ROW EXECUTE FUNCTION trigger_ricalcola_progressivi();
 

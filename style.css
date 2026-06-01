@@ -569,6 +569,34 @@ button.progr-cell:hover {
 }
 button.progr-cell strong { color: var(--blu-scuro); }
 
+/* Pulsante expand sotto-movimenti */
+button.expand-btn {
+  background: transparent !important;
+  border: none !important;
+  color: var(--blu-scuro) !important;
+  cursor: pointer;
+  font-size: 11px !important;
+  padding: 2px 4px !important;
+  border-radius: 3px;
+  width: 18px;
+  text-align: center;
+}
+button.expand-btn:hover { background: var(--grigio-chiaro) !important; }
+
+/* Righe figlio indentate */
+tr.riga-figlio {
+  background: #f7f9fe !important;
+  border-left: 3px solid var(--arancio) !important;
+}
+tr.riga-figlio td { font-size: 11px !important; }
+tr.riga-figlio:hover { background: #edf1fb !important; }
+
+/* Riga padre-riferimento (is_reference) */
+tr.riga-riferimento {
+  opacity: 0.75;
+  font-style: italic;
+}
+
 /* =====================================================================
    DOCUMENTI (coda triage)
 ===================================================================== */

@@ -110,6 +110,7 @@ const ROUTES = {
   "primanota": renderPrimanota,
   "nuovo-movimento": renderNuovoMovimento,
   "modifica-movimento": renderModificaMovimento,
+  "nuovo-movimento-figlio": (rest) => renderFormMovimento(null, rest && rest[0]),
   "analizza-pdf": () => window.AI_SCREEN?.render?.(),
   "documenti": renderDocumenti,
   "abbinamento": renderAbbinamento,
@@ -134,7 +135,7 @@ function router() {
 
   // Alcune route condividono la sezione DOM:
   // - modifica-movimento usa sec-nuovo-movimento (stesso form)
-  const sectionMap = { "modifica-movimento": "nuovo-movimento" };
+  const sectionMap = { "modifica-movimento": "nuovo-movimento", "nuovo-movimento-figlio": "nuovo-movimento" };
   const sectionId = "sec-" + (sectionMap[target] || target);
   const sec = document.getElementById(sectionId);
   if (sec) sec.classList.add("active");
@@ -417,15 +418,22 @@ function primanotaRender(r) {
         ${movs.length === 0 ? `<tr><td colspan="13" class="empty">Nessun movimento</td></tr>` : ""}
         ${movs.map(m => {
           const tooltipDesc = `${escapeHtml(m.descrizione||"")}\nFornitore: ${escapeHtml(m.fornitore_cliente||'—')}\nProgetto: ${escapeHtml(m.progetto||'Generale')}\nMetodo: ${m.metodo||'—'}\nN. doc: ${escapeHtml(m.numero_documento||'—')}`;
-          return `<tr class="${rowClass(m)}" data-id="${m.id}">
+          const hasFigli = (m.child_count || 0) > 0;
+          const isRef = m.is_reference;
+          return `<tr class="${rowClass(m)}${isRef?' riga-riferimento':''}" data-id="${m.id}">
           <td>${m.categoria||""}</td>
-          <td>${canEdit
+          <td style="white-space:nowrap">
+            ${hasFigli ? `<button class="expand-btn" data-id="${m.id}" title="Espandi sotto-movimenti">▶</button>` : `<span style="display:inline-block;width:18px"></span>`}
+            ${canEdit
             ? `<button class="progr-cell" data-id="${m.id}" data-escludi="${!!m.escludi_progr}" data-override="${escapeHtml(m.progressivo_override||'')}" title="${m.escludi_progr?'Riga ESCLUSA dalla numerazione':(m.progressivo_override?'Numero forzato: '+m.progressivo_override:'Click per escludere o forzare numero')}">${m.progressivo!=null ? `<strong>${escapeHtml(m.progressivo)}</strong>` : '<span class="text-muted">—</span>'}${m.progressivo_override?'<span style="font-size:9px;color:var(--arancio)"> ✎</span>':''}</button>`
-            : (m.progressivo!=null?`<strong>${escapeHtml(m.progressivo)}</strong>`:'<span class="text-muted">—</span>')}</td>
+            : (m.progressivo!=null?`<strong>${escapeHtml(m.progressivo)}</strong>`:'<span class="text-muted">—</span>')}
+            ${isRef ? `<span title="Padre riferimento" style="font-size:9px;color:var(--viola,#888)"> 📁</span>` : ''}
+          </td>
           <td>${fmtData(m.data)}</td>
           <td title="${tooltipDesc}">
             <div>${escapeHtml((m.descrizione||"").substring(0,80))}</div>
             ${m.fornitore_cliente ? `<small class="text-muted">${escapeHtml(m.fornitore_cliente.substring(0,40))}${m.numero_documento?' · '+escapeHtml(m.numero_documento):''}</small>` : ''}
+            ${hasFigli ? `<small style="color:var(--arancio);font-size:10px"> · ${m.child_count} sotto-mov.</small>` : ''}
           </td>
           <td class="num">${m.cassa_entrata?`<span class="importo-entrata">${fmtImporto(m.cassa_entrata)}</span>`:''}</td>
           <td class="num">${m.cassa_uscita?`<span class="importo-uscita">${fmtImporto(m.cassa_uscita)}</span>`:''}</td>
@@ -442,6 +450,7 @@ function primanotaRender(r) {
           <td class="col-azioni">
             ${canEdit?`<button class="icon-btn" title="Modifica" data-act="edit" data-id="${m.id}">✎</button>`:""}
             ${canEdit?`<button class="icon-btn" title="Imputazioni" data-act="enti" data-id="${m.id}">🏛</button>`:""}
+            ${canEdit?`<button class="icon-btn" title="Aggiungi sotto-movimento" data-act="add-figlio" data-id="${m.id}">⊕</button>`:""}
             ${canEdit?`<button class="icon-btn" title="Allega documento" data-act="allega" data-id="${m.id}">📎</button>`:""}
             ${canEdit && m.link_documento?`<button class="icon-btn" title="Scollega documento" data-act="scollega" data-id="${m.id}">🔓</button>`:""}
             ${isAdmin?`<button class="icon-btn" title="Elimina" data-act="del" data-id="${m.id}">🗑</button>`:""}
@@ -498,12 +507,96 @@ function primanotaRender(r) {
       }
       else if (act === "enti") openImputazioniModal(id);
       else if (act === "allega") apriModaleAllegaDocumentoDaMovimento(id);
+      else if (act === "add-figlio") {
+        // Crea nuovo sotto-movimento figlio → apre form con parent_id preimpostato
+        location.hash = "#nuovo-movimento-figlio/" + id;
+      }
       else if (act === "scollega") {
         if (!confirm2("Scollegare il documento da questo movimento? Il PDF tornerà in 'Documenti da abbinare'.")) return;
         try {
           await window.SB.scollegaDocumento(id);
           flash("Documento scollegato"); primanotaLoad();
         } catch (e) { flash(e.message, "error"); }
+      }
+    });
+  });
+
+  // Click expand ▶ → carica figli inline
+  document.querySelectorAll("#pn-table-wrap .expand-btn").forEach(btn => {
+    btn.addEventListener("click", async e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const row = btn.closest("tr");
+      const isExpanded = btn.dataset.expanded === "1";
+      if (isExpanded) {
+        // Collapse: rimuovi righe figlio
+        document.querySelectorAll(`tr[data-figlio-di="${id}"]`).forEach(r => r.remove());
+        btn.dataset.expanded = "0";
+        btn.textContent = "▶";
+      } else {
+        // Expand: carica e inserisci figli
+        btn.textContent = "⏳";
+        try {
+          const figli = await window.SB.getFigliMovimento(id);
+          const { fmtImporto, fmtData, escapeHtml } = window.UI;
+          const canEdit = CURRENT_USER.ruolo === "admin" || CURRENT_USER.ruolo === "editor";
+          const isAdmin = CURRENT_USER.ruolo === "admin";
+          let insertAfter = row;
+          figli.forEach(f => {
+            const sommaFigli = figli.reduce((s, fi) => s + +fi.importo, 0);
+            const padre = window._primanotaMovs && window._primanotaMovs.find(m => m.id === id);
+            const tr = document.createElement("tr");
+            tr.dataset.figlioId = f.id;
+            tr.dataset.figlioDi = id;
+            tr.className = "riga-figlio";
+            tr.innerHTML = `
+              <td style="padding-left:28px;font-size:11px;color:#888">${f.categoria||""}</td>
+              <td style="padding-left:12px;font-size:11px">
+                <span style="color:var(--arancio);font-weight:600">${escapeHtml(f.progressivo||"—")}</span>
+              </td>
+              <td style="font-size:11px">${fmtData(f.data)}</td>
+              <td style="padding-left:20px;font-size:11px">
+                <div>↳ ${escapeHtml((f.descrizione||"").substring(0,70))}</div>
+                ${f.fornitore_cliente?`<small class="text-muted">${escapeHtml(f.fornitore_cliente.substring(0,35))}</small>`:''}
+              </td>
+              <td class="num" style="font-size:11px">${f.cassa_entrata?`<span class="importo-entrata">${fmtImporto(f.cassa_entrata)}</span>`:''}</td>
+              <td class="num" style="font-size:11px">${f.cassa_uscita?`<span class="importo-uscita">${fmtImporto(f.cassa_uscita)}</span>`:''}</td>
+              <td class="num" style="font-size:11px">${f.bpe_entrata?`<span class="importo-entrata">${fmtImporto(f.bpe_entrata)}</span>`:''}</td>
+              <td class="num" style="font-size:11px">${f.bpe_uscita?`<span class="importo-uscita">${fmtImporto(f.bpe_uscita)}</span>`:''}</td>
+              <td class="num" style="font-size:11px">${f.nexi_entrata?`<span class="importo-entrata">${fmtImporto(f.nexi_entrata)}</span>`:''}</td>
+              <td class="num" style="font-size:11px">${f.nexi_uscita?`<span class="importo-uscita">${fmtImporto(f.nexi_uscita)}</span>`:''}</td>
+              <td>${f.link_documento?`<a class="icon-btn" href="${escapeHtml(f.link_documento)}" target="_blank">📄</a>`:''}</td>
+              <td><span class="badge-stato ${(f.stato||"").toLowerCase().replace(/ /g,"-")}" style="font-size:9px">${escapeHtml(f.stato||"")}</span></td>
+              <td class="col-azioni" style="white-space:nowrap">
+                ${canEdit?`<button class="icon-btn" title="Modifica" data-act="edit" data-id="${f.id}">✎</button>`:''}
+                ${canEdit?`<button class="icon-btn" title="Promuovi a primario" data-act="promuovi" data-id="${f.id}" data-padre="${id}" style="font-size:10px">⬆ Prim.</button>`:''}
+                ${isAdmin?`<button class="icon-btn" title="Elimina" data-act="del-figlio" data-id="${f.id}" data-padre="${id}">🗑</button>`:''}
+              </td>`;
+            insertAfter.insertAdjacentElement("afterend", tr);
+            insertAfter = tr;
+
+            // Azioni sui figli
+            tr.querySelectorAll("[data-act]").forEach(b => {
+              b.addEventListener("click", async () => {
+                const act2 = b.dataset.act, fid = b.dataset.id, pid = b.dataset.padre;
+                if (act2 === "edit") location.hash = "#modifica-movimento/" + fid;
+                else if (act2 === "del-figlio") {
+                  if (confirm2("Eliminare questo sotto-movimento?")) {
+                    await window.SB.eliminaMovimento(fid);
+                    flash("Eliminato"); primanotaLoad();
+                  }
+                } else if (act2 === "promuovi") {
+                  if (confirm2("Promuovere questo sotto-movimento a primario?\nIl padre rimarrà come riferimento (senza progressivo) se ha altri figli.")) {
+                    await window.SB.promuoviFiglioAPrimario(fid, pid);
+                    flash("Promosso a primario"); primanotaLoad();
+                  }
+                }
+              });
+            });
+          });
+          btn.dataset.expanded = "1";
+          btn.textContent = "▼";
+        } catch(e) { flash(e.message,"error"); btn.textContent="▶"; }
       }
     });
   });
@@ -523,15 +616,20 @@ function primanotaRender(r) {
 function renderNuovoMovimento() { return renderFormMovimento(null); }
 function renderModificaMovimento(rest) { return renderFormMovimento(rest && rest[0]); }
 
-async function renderFormMovimento(id) {
+async function renderFormMovimento(id, parentId = null) {
   const sec = document.getElementById("nuovo-movimento-content");
   const { escapeHtml, todayISO, CATEGORIE, CATEGORIE_USCITA, CATEGORIE_ENTRATA, METODI } = window.UI;
   const PROGETTI = progettiNomi();
-  document.getElementById("nm-title").textContent = id ? "Modifica movimento" : "Nuovo movimento";
-  let m = null;
+  let titleSuffix = id ? "Modifica movimento" : (parentId ? "Nuovo sotto-movimento" : "Nuovo movimento");
+  document.getElementById("nm-title").textContent = titleSuffix;
+  let m = null, padre = null;
   if (id) {
     sec.innerHTML = `<div class="empty"><span class="spinner"></span> Caricamento...</div>`;
     m = await window.SB.getMovimento(id);
+    parentId = m.parent_id || null;
+  }
+  if (parentId && !padre) {
+    padre = await window.SB.getMovimento(parentId).catch(() => null);
   }
   const tipo = m ? m.tipo : "USCITA";
   const cat  = m ? m.categoria : "U2";
@@ -562,12 +660,20 @@ async function renderFormMovimento(id) {
         <div><label>Progetto</label>
           <select id="f-progetto-mov">${PROGETTI.map(p=>`<option ${m&&m.progetto===p?"selected":""}>${p}</option>`).join("")}</select>
         </div>
-        <div class="full"><label>Link documento principale (Drive)</label>
-          <input id="f-link-doc" type="url" value="${escapeHtml(m?m.link_documento:'')}" placeholder="https://drive.google.com/..." /></div>
+        ${padre ? `
+        <div class="full" style="background:#fff8e6;border:1px solid #f0c040;border-radius:6px;padding:10px;margin-bottom:4px">
+          <strong>📁 Sotto-movimento di:</strong>
+          <span style="margin-left:8px">${escapeHtml(padre.progressivo||'—')} — ${escapeHtml(padre.descrizione||'')} (€${+padre.importo})</span>
+          <input type="hidden" id="f-parent-id" value="${parentId}" />
+        </div>` : '<input type="hidden" id="f-parent-id" value="" />'}
+        <div class="full"><label>Link documento (Drive) — incolla link o usa picker</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="f-link-doc" type="url" value="${escapeHtml(m?m.link_documento:'')}" placeholder="https://drive.google.com/..." style="flex:1" />
+            <button type="button" class="secondary" id="btn-picker-doc" title="Scegli da Drive">📂 Drive</button>
+          </div>
+        </div>
         <div class="full"><label>Link file accoppiato / distinta</label>
           <input id="f-link-acc" type="url" value="${escapeHtml(m?m.link_file_accoppiato:'')}" placeholder="distinta BPE / estratto NEXI" /></div>
-        <div class="full"><label>Link PDF unito (fase 2)</label>
-          <input id="f-link-unito" type="url" value="${escapeHtml(m?m.link_pdf_unito:'')}" placeholder="da compilare quando uniti i PDF" /></div>
         <div class="full">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
             <input id="f-senza-doc" type="checkbox" style="width:auto" ${m && m.senza_documento ? "checked" : ""} />
@@ -579,20 +685,21 @@ async function renderFormMovimento(id) {
           <div class="form-grid" style="grid-column:1/-1;grid-template-columns:1fr 1fr">
             <div><label>Progressivo prima nota (auto)</label>
               <input id="f-progr" value="${escapeHtml(m.progressivo || '—')}" readonly style="background:#f5f6fa" />
-              <p class="text-muted" style="font-size:11px;margin-top:2px">Ricalcolato cronologicamente. Le righe "senza documento" non lo hanno.</p>
+              <p class="text-muted" style="font-size:11px;margin-top:2px">Ricalcolato cronologicamente. I sotto-movimenti hanno progressivo tipo 5.1, 5.2…</p>
             </div>
             <div><label>Ordine manuale (opzionale)</label>
               <input id="f-ordine" type="number" value="${m.ordine_manuale ?? ''}" placeholder="lascia vuoto per ordine cronologico" />
-              <p class="text-muted" style="font-size:11px;margin-top:2px">Forza posizione in primanota indipendentemente dalla data.</p>
             </div>
           </div>
-        ` : `<div class="full text-muted" style="font-size:12px">📌 Il progressivo verrà assegnato automaticamente in ordine cronologico al salvataggio.</div>`}
+        ` : `<div class="full text-muted" style="font-size:12px">📌 Il progressivo verrà assegnato automaticamente al salvataggio.</div>`}
       </div>
       <div class="form-actions">
         <button type="button" class="secondary" onclick="location.hash='#primanota'">Annulla</button>
         <button type="submit">${id?"Aggiorna":"Salva movimento"}</button>
       </div>
     </form>
+
+    ${id && !parentId ? `<div id="sottomovimenti-section" style="margin-top:24px"></div>` : ''}
   `;
 
   populateCategoriaSelect(tipo, cat);
@@ -625,22 +732,143 @@ async function renderFormMovimento(id) {
       ordine_manuale: fOrdine && fOrdine.value !== "" ? parseInt(fOrdine.value, 10) : null,
       link_documento: document.getElementById("f-link-doc").value.trim(),
       link_file_accoppiato: document.getElementById("f-link-acc").value.trim(),
-      link_pdf_unito: document.getElementById("f-link-unito").value.trim(),
       senza_documento: document.getElementById("f-senza-doc").checked,
       note: document.getElementById("f-note").value.trim(),
     };
+    // Aggiungi parent_id se presente
+    const fParent = document.getElementById("f-parent-id");
+    if (fParent && fParent.value) data.parent_id = fParent.value;
     try {
       // Check doppioni (solo su nuovi o se cambia importo/data/fornitore)
       const ok = await checkDoppioniPrimaSalvataggio(data, id);
       if (!ok) return;
-      if (id) {
-        // Progressivo è readonly (auto-gestito dal trigger DB), non lo inviamo
-        data.id = id;
-      }
+      if (id) data.id = id;
       await window.SB.salvaMovimento(data);
       flash(id ? "Aggiornato" : "Salvato");
       location.hash = "#primanota";
     } catch (err) { flash(err.message, "error", 6000); }
+  });
+
+  // Drive picker per documento
+  const btnPicker = document.getElementById("btn-picker-doc");
+  if (btnPicker) {
+    btnPicker.addEventListener("click", () => {
+      if (window.DRIVE?.openPicker) {
+        window.DRIVE.openPicker(file => {
+          document.getElementById("f-link-doc").value = file.url || file.webViewLink || "";
+        });
+      } else {
+        flash("Autenticazione Google necessaria — vai in Analizza PDF per autorizzare", "warning");
+      }
+    });
+  }
+
+  // Sezione sotto-movimenti (solo su modifica di un primario)
+  if (id && !parentId) {
+    const sezSub = document.getElementById("sottomovimenti-section");
+    if (sezSub) await renderSottomovimentiSection(sezSub, id, m);
+  }
+}
+
+async function renderSottomovimentiSection(container, padreId, padre) {
+  const { fmtImporto, fmtData, escapeHtml } = window.UI;
+  const isAdmin = CURRENT_USER.ruolo === "admin";
+  const canEdit = isAdmin || CURRENT_USER.ruolo === "editor";
+
+  container.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+  const figli = await window.SB.getFigliMovimento(padreId);
+
+  const sommeFigli = figli.reduce((s, f) => s + +f.importo, 0);
+  const diff = Math.abs((+padre.importo) - sommeFigli);
+  const bilancioOk = diff < 0.01;
+  const bilancioWarn = !bilancioOk && figli.length > 0;
+
+  const isRef = padre.is_reference;
+
+  container.innerHTML = `
+    <div class="form-card" style="margin-top:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">📂 Sotto-movimenti</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${bilancioWarn ? `<span style="color:var(--rosso);font-size:12px">⚠️ Somma figli €${sommeFigli.toFixed(2)} ≠ €${(+padre.importo).toFixed(2)} (differenza: €${diff.toFixed(2)})</span>` : ''}
+          ${bilancioOk && figli.length > 0 ? `<span style="color:var(--verde);font-size:12px">✅ Somma bilanciata</span>` : ''}
+          ${canEdit && isRef ? `<button class="secondary" id="btn-ripristina-padre" style="font-size:11px">↩ Ripristina come primario</button>` : ''}
+          ${canEdit && !isRef && figli.length > 0 ? `<button class="secondary" id="btn-converti-rif" style="font-size:11px">📁 Converti a riferimento</button>` : ''}
+          ${canEdit ? `<button id="btn-add-figlio-form" style="font-size:12px">⊕ Aggiungi sotto-movimento</button>` : ''}
+        </div>
+      </div>
+      ${isRef ? `<div style="background:#fff8e6;border:1px solid #f0c040;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px">
+        📁 <strong>Questo movimento è un riferimento</strong>: non appare nella numerazione principale. I figli hanno progressivo ${escapeHtml(padre.progressivo||'?')}.1, .2 ecc.
+      </div>` : ''}
+      ${figli.length === 0 ? `<p class="text-muted" style="font-size:12px">Nessun sotto-movimento. Clicca "Aggiungi" per crearne uno.</p>` : `
+        <table style="width:100%;font-size:12px">
+          <thead><tr>
+            <th>Progr.</th><th>Data</th><th>Descrizione</th><th>Importo</th><th>Stato</th>${canEdit?'<th>Azioni</th>':''}
+          </tr></thead>
+          <tbody>
+          ${figli.map(f => `<tr>
+            <td><strong>${escapeHtml(f.progressivo||'—')}</strong></td>
+            <td>${fmtData(f.data)}</td>
+            <td>${escapeHtml((f.descrizione||'').substring(0,60))}${f.fornitore_cliente?`<br><small class="text-muted">${escapeHtml(f.fornitore_cliente.substring(0,40))}</small>`:''}</td>
+            <td class="num"><span class="${f.tipo==='ENTRATA'?'importo-entrata':'importo-uscita'}">${fmtImporto(f.importo)}</span></td>
+            <td><span class="badge-stato ${(f.stato||'').toLowerCase().replace(/ /g,'-')}" style="font-size:10px">${escapeHtml(f.stato||'')}</span></td>
+            ${canEdit ? `<td style="white-space:nowrap">
+              <button class="icon-btn" data-act="edit-figlio" data-id="${f.id}" title="Modifica">✎</button>
+              <button class="icon-btn" data-act="promuovi-figlio" data-id="${f.id}" title="Promuovi a primario" style="font-size:10px">⬆ Prim.</button>
+              ${isAdmin?`<button class="icon-btn" data-act="del-figlio" data-id="${f.id}" title="Elimina">🗑</button>`:''}
+            </td>` : ''}
+          </tr>`).join('')}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="3" class="text-right"><strong>Totale figli</strong></td>
+            <td class="num"><strong style="color:${bilancioOk?'var(--verde)':'var(--rosso)'}">${fmtImporto(sommeFigli)}</strong></td>
+            <td colspan="${canEdit?2:1}"></td>
+          </tr></tfoot>
+        </table>
+      `}
+    </div>`;
+
+  // Pulsante aggiungi figlio
+  document.getElementById("btn-add-figlio-form")?.addEventListener("click", () => {
+    location.hash = "#nuovo-movimento-figlio/" + padreId;
+  });
+
+  // Pulsante converti a riferimento
+  document.getElementById("btn-converti-rif")?.addEventListener("click", async () => {
+    if (confirm2("Convertire questo movimento a 'riferimento'?\nNon avrà più un progressivo proprio, i figli manterranno la numerazione (es. 5.1, 5.2).")) {
+      await window.SB.convertePadreARiferimento(padreId);
+      flash("Convertito a riferimento");
+      location.reload();
+    }
+  });
+
+  // Pulsante ripristina padre normale
+  document.getElementById("btn-ripristina-padre")?.addEventListener("click", async () => {
+    await window.SB.ripristinaPadreNormale(padreId);
+    flash("Ripristinato come primario");
+    location.reload();
+  });
+
+  // Azioni su figli nella tabella
+  container.querySelectorAll("[data-act]").forEach(b => {
+    b.addEventListener("click", async () => {
+      const act = b.dataset.act, fid = b.dataset.id;
+      if (act === "edit-figlio") location.hash = "#modifica-movimento/" + fid;
+      else if (act === "del-figlio") {
+        if (confirm2("Eliminare questo sotto-movimento?")) {
+          await window.SB.eliminaMovimento(fid);
+          flash("Eliminato");
+          await renderSottomovimentiSection(container, padreId, padre);
+        }
+      } else if (act === "promuovi-figlio") {
+        if (confirm2("Promuovere a primario? Il padre rimarrà riferimento se ha altri figli.")) {
+          await window.SB.promuoviFiglioAPrimario(fid, padreId);
+          flash("Promosso a primario");
+          padre = await window.SB.getMovimento(padreId);
+          await renderSottomovimentiSection(container, padreId, padre);
+        }
+      }
+    });
   });
 }
 

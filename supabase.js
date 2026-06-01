@@ -37,6 +37,8 @@ async function currentUser() {
 // =====================================================================
 async function getMovimenti(filtri = {}) {
   let q = sb.from("movimenti").select("*", { count: "exact" });
+  // Solo movimenti primari nella lista principale
+  q = q.is("parent_id", null);
   if (filtri.anno)       q = q.eq("anno", filtri.anno);
   if (filtri.mese)       q = q.gte("data", `${filtri.anno || new Date().getFullYear()}-${String(filtri.mese).padStart(2,"0")}-01`)
                           .lt("data",  `${filtri.anno || new Date().getFullYear()}-${String(filtri.mese).padStart(2,"0")}-31`);
@@ -50,8 +52,6 @@ async function getMovimenti(filtri = {}) {
   }
   const sortBy  = filtri.sortBy  || "data";
   const sortDir = filtri.sortDir === "asc";
-  // Per data/progressivo: usa lo stesso criterio del trigger DB (data, creato_il, id)
-  // così l'ordine visualizzato corrisponde alla numerazione progressiva.
   if (sortBy === "data" || sortBy === "progressivo") {
     q = q.order("ordine_manuale", { ascending: true, nullsFirst: false })
          .order("data",       { ascending: sortDir })
@@ -65,7 +65,59 @@ async function getMovimenti(filtri = {}) {
   q = q.range((page - 1) * size, page * size - 1);
   const { data, count, error } = await q;
   if (error) throw error;
-  return { movimenti: data || [], total: count || 0, page, size };
+  const movs = data || [];
+  // Carica conteggio figli per ogni movimento
+  if (movs.length > 0) {
+    const ids = movs.map(m => m.id);
+    const { data: figli } = await sb.from("movimenti").select("parent_id").in("parent_id", ids);
+    const cc = {};
+    (figli || []).forEach(f => { cc[f.parent_id] = (cc[f.parent_id] || 0) + 1; });
+    movs.forEach(m => { m.child_count = cc[m.id] || 0; });
+  }
+  return { movimenti: movs, total: count || 0, page, size };
+}
+
+// Carica i sotto-movimenti (figli) di un movimento padre
+async function getFigliMovimento(parentId) {
+  const { data, error } = await sb.from("movimenti")
+    .select("*")
+    .eq("parent_id", parentId)
+    .order("data", { ascending: true })
+    .order("creato_il", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// Crea un sotto-movimento figlio
+async function creaFiglioMovimento(dati) {
+  const { data, error } = await sb.from("movimenti").insert([dati]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Promuovi figlio a primario (parent_id = NULL)
+// Se il padre non ha altri figli, rimuove is_reference
+async function promuoviFiglioAPrimario(figlioId, padreId) {
+  const { error } = await sb.from("movimenti").update({ parent_id: null }).eq("id", figlioId);
+  if (error) throw error;
+  if (padreId) {
+    const { data: altriFigli } = await sb.from("movimenti").select("id").eq("parent_id", padreId);
+    if (!altriFigli || altriFigli.length === 0) {
+      await sb.from("movimenti").update({ is_reference: false }).eq("id", padreId);
+    }
+  }
+}
+
+// Converti padre a riferimento (senza progressivo, contiene i figli)
+async function convertePadreARiferimento(padreId) {
+  const { error } = await sb.from("movimenti").update({ is_reference: true }).eq("id", padreId);
+  if (error) throw error;
+}
+
+// Ripristina padre da riferimento a normale
+async function ripristinaPadreNormale(padreId) {
+  const { error } = await sb.from("movimenti").update({ is_reference: false }).eq("id", padreId);
+  if (error) throw error;
 }
 
 async function getMovimento(id) {
@@ -930,6 +982,9 @@ window.SB = {
   ricalcolaProgressivi, cercaMatchPerDocumento, allegaDocumentoAMovimento,
   allegaDocumentoAMovimenti, cercaMovimentiLiberi,
   unisciMovimenti, scollegaDocumento,
+  // sotto-movimenti
+  getFigliMovimento, creaFiglioMovimento, promuoviFiglioAPrimario,
+  convertePadreARiferimento, ripristinaPadreNormale,
   // documenti in coda
   salvaDocumentoDaTriagre, getDocumentiInCoda, aggiornaStatoDocumento,
   // helper match (esposti per UI)

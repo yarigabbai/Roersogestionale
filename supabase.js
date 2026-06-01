@@ -40,8 +40,14 @@ async function getMovimenti(filtri = {}) {
   // Solo movimenti primari nella lista principale
   q = q.is("parent_id", null);
   if (filtri.anno)       q = q.eq("anno", filtri.anno);
-  if (filtri.mese)       q = q.gte("data", `${filtri.anno || new Date().getFullYear()}-${String(filtri.mese).padStart(2,"0")}-01`)
-                          .lt("data",  `${filtri.anno || new Date().getFullYear()}-${String(filtri.mese).padStart(2,"0")}-31`);
+  if (filtri.mese) {
+    const y = filtri.anno || new Date().getFullYear();
+    const m = filtri.mese;
+    const nextY = m === 12 ? y + 1 : y;
+    const nextM = m === 12 ? 1 : m + 1;
+    q = q.gte("data", `${y}-${String(m).padStart(2,"0")}-01`)
+         .lt("data",  `${nextY}-${String(nextM).padStart(2,"0")}-01`);
+  }
   if (filtri.tipo)       q = q.eq("tipo", filtri.tipo);
   if (filtri.categoria)  q = q.eq("categoria", filtri.categoria);
   if (filtri.metodo)     q = q.eq("metodo", filtri.metodo);

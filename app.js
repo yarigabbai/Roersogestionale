@@ -699,6 +699,7 @@ async function renderFormMovimento(id, parentId = null) {
       </div>
     </form>
 
+    ${id ? `<div id="allegati-section" style="margin-top:24px"></div>` : ''}
     ${id && !parentId ? `<div id="sottomovimenti-section" style="margin-top:24px"></div>` : ''}
   `;
 
@@ -765,8 +766,12 @@ async function renderFormMovimento(id, parentId = null) {
 
   // Sezione sotto-movimenti (solo su modifica di un primario)
   if (id && !parentId) {
-    const sezSub = document.getElementById("sottomovimenti-section");
-    if (sezSub) await renderSottomovimentiSection(sezSub, id, m);
+    // Carica sezione allegati
+  const sezAll = document.getElementById("allegati-section");
+  if (sezAll && window.ALLEGATI) await window.ALLEGATI.render(sezAll, id);
+
+  const sezSub = document.getElementById("sottomovimenti-section");
+  if (sezSub) await renderSottomovimentiSection(sezSub, id, m);
   }
 }
 

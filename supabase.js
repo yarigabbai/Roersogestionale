@@ -978,6 +978,111 @@ function escapeHtml(s) {
 }
 
 // =====================================================================
+// ALLEGATI MOVIMENTO
+// =====================================================================
+const BUCKET_ALLEGATI = "allegati";
+
+async function getAllegatiMovimento(movimentoId) {
+  const { data, error } = await sb.from("allegati_movimento")
+    .select("*")
+    .eq("movimento_id", movimentoId)
+    .order("ordine", { ascending: true })
+    .order("creato_il", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// Upload file → Storage, poi salva riga in allegati_movimento
+async function uploadAllegato(movimentoId, file, tipo = "altro") {
+  const ext = file.name.split(".").pop().toLowerCase();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${movimentoId}/${Date.now()}_${safeName}`;
+
+  const { error: upErr } = await sb.storage.from(BUCKET_ALLEGATI).upload(path, file, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+  if (upErr) throw upErr;
+
+  // Genera signed URL valida 10 anni (per link permanente pratico)
+  const { data: signed, error: signErr } = await sb.storage.from(BUCKET_ALLEGATI)
+    .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+  if (signErr) throw signErr;
+
+  const { data, error } = await sb.from("allegati_movimento").insert([{
+    movimento_id: movimentoId,
+    storage_path: path,
+    storage_url: signed.signedUrl,
+    nome: file.name,
+    tipo,
+    mime_type: file.type || null,
+    dimensione: file.size || null,
+  }]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Allega link Drive (no upload fisico)
+async function allegaDriveAllegato(movimentoId, driveFileId, link, nome, tipo = "altro") {
+  const { data, error } = await sb.from("allegati_movimento").insert([{
+    movimento_id: movimentoId,
+    drive_file_id: driveFileId || null,
+    link,
+    nome,
+    tipo,
+  }]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Elimina allegato + file Storage (se presente)
+async function eliminaAllegato(allegatoId) {
+  const { data: all } = await sb.from("allegati_movimento").select("storage_path").eq("id", allegatoId).single();
+  if (all?.storage_path) {
+    await sb.storage.from(BUCKET_ALLEGATI).remove([all.storage_path]);
+  }
+  const { error } = await sb.from("allegati_movimento").delete().eq("id", allegatoId);
+  if (error) throw error;
+}
+
+// Aggiorna tipo / ordine / nome
+async function aggiornaAllegato(allegatoId, patch) {
+  const { error } = await sb.from("allegati_movimento").update(patch).eq("id", allegatoId);
+  if (error) throw error;
+}
+
+// Salva PDF unito già generato (Uint8Array) su Storage e registra allegato
+async function salvaPdfUnito(movimentoId, pdfBytes, nomeFile = "documento_unito.pdf") {
+  const blob = new Blob([pdfBytes], { type: "application/pdf" });
+  const file = new File([blob], nomeFile, { type: "application/pdf" });
+
+  // Rimuovi eventuale pdf_unito precedente per questo movimento
+  const { data: vecchi } = await sb.from("allegati_movimento")
+    .select("id, storage_path")
+    .eq("movimento_id", movimentoId)
+    .eq("tipo", "pdf_unito");
+  for (const v of vecchi || []) {
+    if (v.storage_path) await sb.storage.from(BUCKET_ALLEGATI).remove([v.storage_path]);
+    await sb.from("allegati_movimento").delete().eq("id", v.id);
+  }
+
+  const allegato = await uploadAllegato(movimentoId, file, "pdf_unito");
+
+  // Aggiorna anche link_pdf_unito sul movimento per retro-compatibilità
+  await sb.from("movimenti").update({ link_pdf_unito: allegato.storage_url }).eq("id", movimentoId);
+
+  return allegato;
+}
+
+// Genera signed URL fresca per un allegato (le signed URL scadono)
+async function getSignedUrlAllegato(storagePath) {
+  const { data, error } = await sb.storage.from(BUCKET_ALLEGATI)
+    .createSignedUrl(storagePath, 60 * 60); // 1 ora
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// =====================================================================
 // EXPORT GLOBALE
 // =====================================================================
 window.SB = {
@@ -991,6 +1096,9 @@ window.SB = {
   // sotto-movimenti
   getFigliMovimento, creaFiglioMovimento, promuoviFiglioAPrimario,
   convertePadreARiferimento, ripristinaPadreNormale,
+  // allegati movimento
+  getAllegatiMovimento, uploadAllegato, allegaDriveAllegato,
+  eliminaAllegato, aggiornaAllegato, salvaPdfUnito, getSignedUrlAllegato,
   // documenti in coda
   salvaDocumentoDaTriagre, getDocumentiInCoda, aggiornaStatoDocumento,
   // helper match (esposti per UI)

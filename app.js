@@ -1954,7 +1954,8 @@ async function apriModaleAllegaDocumentoDaMovimento(movId) {
     e.preventDefault(); dropZone.style.background = "#fafbff";
     fileDaSalvare = [...fileDaSalvare, ...Array.from(e.dataTransfer.files)]; aggiornaFileList();
   });
-  dropZone.addEventListener("click", () => inputFile.click());
+  // NON aggiungere click handler su label: il label wrapping l'input lo gestisce già nativamente.
+  // Un secondo .click() aprirebbe il dialog due volte chiudendolo subito.
 
   // ---- DRIVE PICKER nel tab link ----
   body.querySelector("#btn-picker-modal")?.addEventListener("click", () => {

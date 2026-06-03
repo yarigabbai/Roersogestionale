@@ -1805,80 +1805,231 @@ function showRecoveryForm() {
 async function apriModaleAllegaDocumentoDaMovimento(movId) {
   const { fmtImporto, fmtData, escapeHtml } = window.UI;
   const mov = await window.SB.getMovimento(movId);
-  // Carica documenti da abbinare (coda)
   const docs = await window.SB.getDocumentiInCoda({ stato: 'da_abbinare' });
-  // Calcola score per ognuno rispetto al movimento
   const ranked = docs.map(d => ({
     ...d,
     score: window.SB.calcolaScoreMatch(mov, {
-      importo: d.ai_importo,
-      data: d.ai_data_documento,
-      data_documento: d.ai_data_documento,
-      fornitore_cliente: d.ai_fornitore,
+      importo: d.ai_importo, data: d.ai_data_documento,
+      data_documento: d.ai_data_documento, fornitore_cliente: d.ai_fornitore,
     }),
   })).sort((a, b) => b.score - a.score);
 
   const body = document.createElement("div");
   body.innerHTML = `
-    <div class="alert alert-info" style="font-size:13px">
-      Movimento: <strong>${escapeHtml(mov.progressivo!=null?String(mov.progressivo):'—')}</strong> · ${fmtData(mov.data)} · ${escapeHtml(mov.descrizione||'').substring(0,80)} · <strong>${fmtImporto(mov.importo)}</strong>
+    <div class="alert alert-info" style="font-size:13px;margin-bottom:12px">
+      Movimento <strong>${escapeHtml(mov.progressivo!=null?String(mov.progressivo):'—')}</strong>
+      · ${fmtData(mov.data)} · ${escapeHtml((mov.descrizione||'').substring(0,60))}
+      · <strong>${fmtImporto(mov.importo)}</strong>
     </div>
-    ${docs.length === 0 ? `<div class="alert alert-warning">Nessun documento in coda "Da abbinare". Importa documenti via Drive Picker o carica manualmente.</div>` : `
-    <p style="font-size:13px;margin-bottom:6px">Seleziona il documento da allegare:</p>
-    <input id="dochint-search" placeholder="🔍 Filtra per nome file o fornitore..." style="margin-bottom:8px" />
-    <div id="dochint-list" style="max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
-    `}
-  `;
 
+    <!-- TAB NAV -->
+    <div class="tab-nav" style="display:flex;gap:0;border-bottom:2px solid var(--grigio-bordo);margin-bottom:14px">
+      <button class="tab-btn active" data-tab="coda" style="padding:8px 16px;border:none;background:none;cursor:pointer;border-bottom:2px solid var(--blu);margin-bottom:-2px;font-weight:600">
+        📂 Coda documenti (${docs.length})
+      </button>
+      <button class="tab-btn" data-tab="link" style="padding:8px 16px;border:none;background:none;cursor:pointer;color:#888">
+        🔗 Link Drive / URL
+      </button>
+      <button class="tab-btn" data-tab="upload" style="padding:8px 16px;border:none;background:none;cursor:pointer;color:#888">
+        ⬆️ Carica file
+      </button>
+    </div>
+
+    <!-- TAB: CODA -->
+    <div id="tab-coda">
+      ${docs.length === 0
+        ? `<div class="alert alert-warning" style="font-size:13px">Nessun documento in coda. Usa "Link Drive" o "Carica file".</div>`
+        : `<input id="dochint-search" placeholder="🔍 Filtra per nome o fornitore..." style="margin-bottom:8px" />
+           <div id="dochint-list" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>`
+      }
+    </div>
+
+    <!-- TAB: LINK -->
+    <div id="tab-link" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="input-link-doc" type="url" placeholder="https://drive.google.com/file/d/..." style="flex:1" />
+        <button class="secondary" id="btn-picker-modal" title="Scegli da Drive">📂 Drive</button>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px">
+          <label style="font-size:12px">Nome documento</label>
+          <input id="input-link-nome" placeholder="es. Fattura Wix.com" />
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:12px">Data documento</label>
+          <input id="input-link-data" type="date" />
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:12px">N. documento</label>
+          <input id="input-link-numdoc" placeholder="FPR 12/2026" />
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:11px;margin-top:8px">
+        Incolla il link Drive (o qualsiasi URL) e verrà salvato direttamente sul movimento.
+        Se vuoi anche caricarlo in allegati usa la tab "Carica file".
+      </p>
+    </div>
+
+    <!-- TAB: UPLOAD -->
+    <div id="tab-upload" style="display:none">
+      <label style="display:block;border:2px dashed var(--grigio-bordo);border-radius:8px;padding:24px;text-align:center;cursor:pointer;background:#fafbff" id="drop-zone">
+        <input type="file" id="input-file-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx" style="display:none" multiple />
+        <div style="font-size:32px">📄</div>
+        <div style="font-size:14px;margin-top:8px"><strong>Clicca per scegliere</strong> o trascina qui</div>
+        <div style="font-size:11px;color:#888;margin-top:4px">PDF, immagini, Word, Excel — max 50 MB</div>
+      </label>
+      <div id="upload-file-list" style="margin-top:10px;font-size:13px"></div>
+      <div id="upload-progress" style="display:none;margin-top:8px">
+        <div style="background:#e8eef7;border-radius:6px;height:6px"><div id="upload-progress-bar" style="background:var(--blu);height:100%;width:0%;transition:width .3s"></div></div>
+        <p id="upload-progress-msg" style="font-size:11px;color:#888;margin:4px 0 0"></p>
+      </div>
+    </div>`;
+
+  // ---- TAB SWITCHING ----
+  let activeTab = "coda";
+  body.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      body.querySelectorAll(".tab-btn").forEach(b => {
+        b.classList.remove("active");
+        b.style.borderBottom = "2px solid transparent";
+        b.style.fontWeight = "400";
+        b.style.color = "#888";
+      });
+      btn.classList.add("active");
+      btn.style.borderBottom = "2px solid var(--blu)";
+      btn.style.fontWeight = "600";
+      btn.style.color = "";
+      activeTab = btn.dataset.tab;
+      body.querySelectorAll("[id^='tab-']").forEach(t => t.style.display = "none");
+      body.querySelector(`#tab-${activeTab}`).style.display = "";
+    });
+  });
+
+  // ---- CODA: render lista ----
   function renderLista(filtro = "") {
     const host = body.querySelector("#dochint-list");
     if (!host) return;
     const flt = filtro.toLowerCase();
     const items = ranked.filter(d =>
-      !flt
-      || (d.nome_file||'').toLowerCase().includes(flt)
-      || (d.ai_fornitore||'').toLowerCase().includes(flt)
-      || (d.ai_descrizione||'').toLowerCase().includes(flt)
+      !flt || (d.nome_file||'').toLowerCase().includes(flt)
+           || (d.ai_fornitore||'').toLowerCase().includes(flt)
     );
-    host.innerHTML = items.map(d => `
-      <label class="dochint-row" style="display:flex;gap:10px;align-items:center;padding:8px;border:1px solid var(--grigio-bordo);border-radius:4px;cursor:pointer">
-        <input type="radio" name="docpick" value="${escapeHtml(d.drive_file_id)}" />
-        <div style="flex:1;font-size:13px">
-          <strong>${escapeHtml(d.nome_file)}</strong>
-          <div class="text-muted" style="font-size:11px">${escapeHtml(d.ai_fornitore||'')} · ${fmtImporto(d.ai_importo||0)} · ${d.ai_data_documento?fmtData(d.ai_data_documento):'(no data)'}</div>
-        </div>
-        <div style="text-align:right;font-size:11px">
-          <a href="${escapeHtml(d.web_view_link||'#')}" target="_blank">apri</a>
-          <div class="text-muted">match <strong>${d.score}%</strong></div>
-        </div>
-      </label>
-    `).join("");
+    host.innerHTML = items.length === 0
+      ? `<p class="text-muted" style="font-size:12px">Nessun risultato</p>`
+      : items.map(d => `
+        <label style="display:flex;gap:10px;align-items:center;padding:8px;border:1px solid var(--grigio-bordo);border-radius:4px;cursor:pointer">
+          <input type="radio" name="docpick" value="${escapeHtml(d.drive_file_id)}" />
+          <div style="flex:1;font-size:12px">
+            <div><strong>${escapeHtml(d.nome_file)}</strong></div>
+            <div class="text-muted">${escapeHtml(d.ai_fornitore||'')} · ${fmtImporto(d.ai_importo||0)} · ${d.ai_data_documento?fmtData(d.ai_data_documento):''}</div>
+          </div>
+          <div style="text-align:right;font-size:11px">
+            ${d.web_view_link?`<a href="${escapeHtml(d.web_view_link)}" target="_blank" onclick="event.stopPropagation()">apri</a>`:''}
+            <div class="text-muted">match <strong>${d.score}%</strong></div>
+          </div>
+        </label>`).join("");
   }
+
+  // ---- UPLOAD: drag&drop + file list ----
+  let fileDaSalvare = [];
+  const dropZone = body.querySelector("#drop-zone");
+  const inputFile = body.querySelector("#input-file-upload");
+  const fileListEl = body.querySelector("#upload-file-list");
+
+  function aggiornaFileList() {
+    fileListEl.innerHTML = fileDaSalvare.length === 0 ? ""
+      : fileDaSalvare.map((f, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#f5f6fa;border-radius:4px;margin:3px 0">
+          <span>📄 ${escapeHtml(f.name)} <small class="text-muted">(${(f.size/1024).toFixed(0)} KB)</small></span>
+          <button class="icon-btn" data-ri="${i}" title="Rimuovi">✕</button>
+        </div>`).join("");
+    fileListEl.querySelectorAll("[data-ri]").forEach(b =>
+      b.addEventListener("click", () => { fileDaSalvare.splice(+b.dataset.ri, 1); aggiornaFileList(); })
+    );
+  }
+  inputFile.addEventListener("change", () => { fileDaSalvare = [...fileDaSalvare, ...Array.from(inputFile.files)]; aggiornaFileList(); });
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.style.background = "#e8eef7"; });
+  dropZone.addEventListener("dragleave", () => { dropZone.style.background = "#fafbff"; });
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault(); dropZone.style.background = "#fafbff";
+    fileDaSalvare = [...fileDaSalvare, ...Array.from(e.dataTransfer.files)]; aggiornaFileList();
+  });
+  dropZone.addEventListener("click", () => inputFile.click());
+
+  // ---- DRIVE PICKER nel tab link ----
+  body.querySelector("#btn-picker-modal")?.addEventListener("click", () => {
+    if (!window.DRIVE?.openPicker) { flash("Autenticazione Google necessaria", "warning"); return; }
+    window.DRIVE.openPicker(file => {
+      body.querySelector("#input-link-doc").value = file.url || file.webViewLink || "";
+      if (!body.querySelector("#input-link-nome").value)
+        body.querySelector("#input-link-nome").value = file.name || "";
+    });
+  });
 
   openModal({
     title: "📎 Allega documento al movimento", body, wide: true,
-    saveLabel: "Allega selezionato",
+    saveLabel: "Allega",
     onSave: async () => {
-      const sel = body.querySelector('input[name="docpick"]:checked');
-      if (!sel) return flash("Seleziona un documento", "warning"), false;
-      const driveFileId = sel.value;
-      const doc = docs.find(d => d.drive_file_id === driveFileId);
-      try {
+      // TAB: coda
+      if (activeTab === "coda") {
+        const sel = body.querySelector('input[name="docpick"]:checked');
+        if (!sel) { flash("Seleziona un documento", "warning"); return false; }
+        const doc = docs.find(d => d.drive_file_id === sel.value);
         await window.SB.allegaDocumentoAMovimento(movId, {
           link_documento: doc.web_view_link,
           data_documento: doc.ai_data_documento,
           numero_documento: doc.ai_numero_documento,
-          drive_file_id: driveFileId,
+          drive_file_id: doc.drive_file_id,
         });
-        await window.SB.aggiornaStatoDocumento(driveFileId, 'abbinato', movId, `Allegato da Prima Nota a ${mov.progressivo!=null?mov.progressivo:'—'}`);
-        flash("Allegato"); primanotaLoad();
-      } catch (e) { flash("Errore: " + e.message, "error"); return false; }
+        await window.SB.aggiornaStatoDocumento(doc.drive_file_id, 'abbinato', movId,
+          `Allegato da Prima Nota a ${mov.progressivo!=null?mov.progressivo:'—'}`);
+        flash("Documento allegato"); primanotaLoad(); return true;
+      }
+
+      // TAB: link
+      if (activeTab === "link") {
+        const link = body.querySelector("#input-link-doc").value.trim();
+        if (!link) { flash("Inserisci un link", "warning"); return false; }
+        const nome = body.querySelector("#input-link-nome").value.trim() || link.split("/").pop() || "Documento";
+        const dataDoc = body.querySelector("#input-link-data").value || null;
+        const numDoc = body.querySelector("#input-link-numdoc").value.trim() || null;
+        // Salva link_documento sul movimento
+        await window.SB.salvaMovimento({ id: movId, link_documento: link, data_documento: dataDoc, numero_documento: numDoc });
+        // Aggiungi anche in allegati_movimento per multi-doc
+        if (window.SB.allegaDriveAllegato)
+          await window.SB.allegaDriveAllegato(movId, null, link, nome, "altro");
+        flash("Link allegato"); primanotaLoad(); return true;
+      }
+
+      // TAB: upload
+      if (activeTab === "upload") {
+        if (fileDaSalvare.length === 0) { flash("Nessun file selezionato", "warning"); return false; }
+        const prog = body.querySelector("#upload-progress");
+        const bar = body.querySelector("#upload-progress-bar");
+        const msg = body.querySelector("#upload-progress-msg");
+        prog.style.display = "block";
+        for (let i = 0; i < fileDaSalvare.length; i++) {
+          const f = fileDaSalvare[i];
+          if (msg) msg.textContent = `Caricamento ${i+1}/${fileDaSalvare.length}: ${f.name}`;
+          if (bar) bar.style.width = `${Math.round((i/fileDaSalvare.length)*90)}%`;
+          try {
+            const all = await window.SB.uploadAllegato(movId, f, "altro");
+            // Se è il primo file, imposta anche link_documento sul movimento
+            if (i === 0 && !mov.link_documento)
+              await window.SB.salvaMovimento({ id: movId, link_documento: all.storage_url });
+          } catch (e) { flash(`Errore ${f.name}: ${e.message}`, "error"); }
+        }
+        if (bar) bar.style.width = "100%";
+        if (msg) msg.textContent = "✅ Caricato";
+        flash(`${fileDaSalvare.length} file caricati`); primanotaLoad(); return true;
+      }
     }
   });
+
   setTimeout(() => {
     if (docs.length) {
       renderLista("");
-      body.querySelector("#dochint-search").addEventListener("input", e => renderLista(e.target.value));
+      body.querySelector("#dochint-search")?.addEventListener("input", e => renderLista(e.target.value));
     }
   }, 50);
 }

@@ -731,3 +731,16 @@ tr.riga-riferimento {
 /* Dialogo tipo allegato */
 .tipo-opt:hover { background: var(--grigio-chiaro); }
 
+/* Checkbox merge */
+.chk-merge {
+  width: 15px !important;
+  height: 15px !important;
+  cursor: pointer;
+  accent-color: var(--blu);
+  flex-shrink: 0;
+}
+.allegato-riga:has(.chk-merge:checked) {
+  background: #e8f0fe !important;
+  border-color: var(--blu) !important;
+}
+
